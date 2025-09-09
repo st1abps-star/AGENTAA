@@ -1,29 +1,19 @@
 import { NextRequest } from 'next/server';
 
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
 const SYSTEM_PROMPT = `You are an expert AI agent.
-... (keep your long system prompt here) ...
-`;
+Think carefully through each query, give precise and professional answers, avoid fluff.`;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Missing GEMINI_API_KEY' }), {
-      status: 500,
-    });
+    return new Response(JSON.stringify({ error: 'Missing GEMINI_API_KEY' }), { status: 500 });
   }
 
-  const {
-    messages,
-    temperature,
-  }: {
-    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-    temperature?: number;
-  } = await req.json();
+  const { messages, temperature }: { messages: Array<{ role: 'user' | 'assistant'; content: string }>; temperature?: number } = await req.json();
 
-  const safetySettings = [];
   const generationConfig: Record<string, unknown> = {
     temperature: typeof temperature === 'number' ? temperature : 0.4,
     topP: 0.95,
@@ -31,12 +21,11 @@ export async function POST(req: NextRequest) {
     maxOutputTokens: 2048,
   };
 
-  // Gemini format: contents = array of { parts: [{ text: ... }] }
+  // Build messages: system + user/assistant history
   const contents = [
-    {
-      parts: [{ text: `SYSTEM:\n${SYSTEM_PROMPT}` }],
-    },
+    { role: 'user', parts: [{ text: `SYSTEM:\n${SYSTEM_PROMPT}` }] },
     ...messages.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
     })),
   ];
@@ -45,21 +34,16 @@ export async function POST(req: NextRequest) {
     const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, safetySettings, generationConfig }),
+      body: JSON.stringify({ contents, generationConfig }),
     });
 
     if (!resp.ok) {
       const text = await resp.text();
-      return new Response(
-        JSON.stringify({ error: 'Gemini API error', info: text }),
-        { status: 502 }
-      );
+      return new Response(JSON.stringify({ error: 'Gemini API error', info: text }), { status: 502 });
     }
 
     const data = await resp.json();
-    const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-      '(no response text from Gemini)';
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     return new Response(JSON.stringify({ text, raw: data }), { status: 200 });
   } catch (err: unknown) {
     return new Response(
